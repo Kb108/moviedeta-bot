@@ -1,144 +1,65 @@
 const TELEGRAM_API = (token) =>
   `https://api.telegram.org/bot${token}`;
 
-const DEFAULT_SOURCE = "default";
+const DELETE_AFTER_SECONDS = 300;
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "content-type": "application/json;charset=UTF-8",
-    },
-  });
-}
-
-function now() {
+function currentTime() {
   return Math.floor(Date.now() / 1000);
 }
 
-function normalizeText(text = "") {
-  return text
+function html(value = "") {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function normalize(value = "") {
+  return String(value)
     .toLowerCase()
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-async function telegram(env, method, body) {
+async function telegram(env, method, data) {
   const response = await fetch(
     `${TELEGRAM_API(env.BOT_TOKEN)}/${method}`,
     {
       method: "POST",
       headers: {
-        "content-type": "application/json",
+        "Content-Type": "application/json"
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(data)
     }
   );
 
   return response.json();
 }
 
-async function sendMessage(env, chatId, text, options = {}) {
+async function sendMessage(env, chatId, text, extra = {}) {
   return telegram(env, "sendMessage", {
     chat_id: chatId,
     text,
     parse_mode: "HTML",
-    ...options,
+    ...extra
   });
 }
 
 async function deleteMessage(env, chatId, messageId) {
+  if (!messageId) return;
+
   return telegram(env, "deleteMessage", {
     chat_id: chatId,
-    message_id: messageId,
+    message_id: messageId
   });
 }
 
-async function getChatMember(env, channel, userId) {
-  return telegram(env, "getChatMember", {
-    chat_id: channel,
-    user_id: userId,
-  });
-}
+/* -----------------------------
+   USER
+----------------------------- */
 
-async function isUserJoined(env, userId) {
-  try {
-    const result = await getChatMember(
-      env,
-      env.FORCE_JOIN_CHANNEL,
-      userId
-    );
-
-    if (!result.ok) {
-      return false;
-    }
-
-    const status = result.result?.status;
-
-    return [
-      "creator",
-      "administrator",
-      "member",
-    ].includes(status);
-  } catch {
-    return false;
-  }
-}
-
-async function forceJoinKeyboard(env) {
-  return {
-    inline_keyboard: [
-      [
-        {
-          text: "📢 JOIN CHANNEL",
-          url: `https://t.me/${env.FORCE_JOIN_CHANNEL.replace("@", "")}`,
-        },
-      ],
-      [
-        {
-          text: "✅ I HAVE JOINED",
-          callback_data: "check_join",
-        },
-      ],
-    ],
-  };
-}
-
-async function mainMenu(env) {
-  return {
-    inline_keyboard: [
-      [
-        {
-          text: "🎬 MOVIE GROUP",
-          url: env.MOVIE_GROUP_URL,
-        },
-        {
-          text: "🆘 HELP",
-          url: env.HELP_URL,
-        },
-      ],
-      [
-        {
-          text: "🛍️ FLIPKART / AMAZON OFFERS",
-          url: env.OFFERS_URL,
-        },
-      ],
-      [
-        {
-          text: "👥 REFERRAL",
-          callback_data: "referral",
-        },
-        {
-          text: "ℹ️ ABOUT",
-          callback_data: "about",
-        },
-      ],
-    ],
-  };
-}
-
-async function upsertUser(env, user, referralCode = null) {
+async function saveUser(env, user) {
   if (!user?.id) return;
 
   const existing = await env.DB.prepare(
@@ -147,25 +68,7 @@ async function upsertUser(env, user, referralCode = null) {
     .bind(user.id)
     .first();
 
-  if (!existing) {
-    const code =
-      referralCode ||
-      Math.random().toString(36).slice(2, 10);
-
-    await env.DB.prepare(
-      `INSERT INTO users
-      (user_id, username, first_name, joined_at, referral_code)
-      VALUES (?, ?, ?, ?, ?)`
-    )
-      .bind(
-        user.id,
-        user.username || null,
-        user.first_name || null,
-        now(),
-        code
-      )
-      .run();
-  } else {
+  if (existing) {
     await env.DB.prepare(
       `UPDATE users
        SET username = ?, first_name = ?
@@ -177,188 +80,337 @@ async function upsertUser(env, user, referralCode = null) {
         user.id
       )
       .run();
+
+    return;
+  }
+
+  const referralCode =
+    Math.random().toString(36).substring(2, 10);
+
+  await env.DB.prepare(
+    `INSERT INTO users
+     (user_id, username, first_name, joined_at, referral_code)
+     VALUES (?, ?, ?, ?, ?)`
+  )
+    .bind(
+      user.id,
+      user.username || null,
+      user.first_name || null,
+      currentTime(),
+      referralCode
+    )
+    .run();
+}
+
+/* -----------------------------
+   FORCE JOIN
+----------------------------- */
+
+async function checkMembership(env, userId) {
+  try {
+    const result = await telegram(
+      env,
+      "getChatMember",
+      {
+        chat_id: env.FORCE_JOIN_CHANNEL,
+        user_id: userId
+      }
+    );
+
+    if (!result.ok) {
+      return false;
+    }
+
+    const status = result.result?.status;
+
+    return [
+      "creator",
+      "administrator",
+      "member"
+    ].includes(status);
+  } catch {
+    return false;
   }
 }
 
+function joinKeyboard(env) {
+  const channel =
+    env.FORCE_JOIN_CHANNEL.replace("@", "");
+
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: "📢 JOIN CHANNEL",
+          url: `https://t.me/${channel}`
+        }
+      ],
+      [
+        {
+          text: "✅ CHECK JOIN",
+          callback_data: "check_join"
+        }
+      ]
+    ]
+  };
+}
+
+/* -----------------------------
+   MAIN MENU
+----------------------------- */
+
+function mainKeyboard(env) {
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: "🎬 MOVIE GROUP",
+          url: env.MOVIE_GROUP_URL
+        }
+      ],
+      [
+        {
+          text: "🛍️ FLIPKART / AMAZON OFFERS",
+          url: env.OFFERS_URL
+        }
+      ],
+      [
+        {
+          text: "🆘 HELP",
+          url: env.HELP_URL
+        }
+      ],
+      [
+        {
+          text: "👥 REFERRAL",
+          callback_data: "referral"
+        }
+      ]
+    ]
+  };
+}
+
+/* -----------------------------
+   SEARCH
+----------------------------- */
+
 async function searchMovies(env, query) {
-  const q = normalizeText(query);
+  const normalized = normalize(query);
 
-  if (!q) return [];
+  if (!normalized) {
+    return [];
+  }
 
-  const like = `%${q}%`;
+  const words = normalized.split(" ");
 
-  const result = await env.DB.prepare(
-    `SELECT *
-     FROM movies
-     WHERE lower(title) LIKE ?
-     ORDER BY created_at DESC
-     LIMIT 20`
-  )
-    .bind(like)
+  let sql = `
+    SELECT *
+    FROM movies
+    WHERE 1 = 1
+  `;
+
+  const params = [];
+
+  for (const word of words) {
+    sql += ` AND title LIKE ?`;
+    params.push(`%${word}%`);
+  }
+
+  sql += `
+    ORDER BY created_at DESC
+    LIMIT 20
+  `;
+
+  const result = await env.DB.prepare(sql)
+    .bind(...params)
     .all();
 
   return result.results || [];
 }
 
-async function sendSearchResults(env, chatId, query) {
+async function searchFromGroup(env, message) {
+  const query = message.text?.trim();
+
+  if (!query) return;
+
   const results = await searchMovies(env, query);
 
   if (!results.length) {
-    return sendMessage(
+    const response = await sendMessage(
       env,
-      chatId,
-      `❌ <b>NO RESULT FOUND</b>\n\n` +
-        `We could not find:\n` +
-        `<code>${escapeHtml(query)}</code>\n\n` +
-        `Please check the spelling and try again.`
+      message.chat.id,
+      `❌ <b>Movie Not Found</b>\n\n` +
+      `No movie found for:\n` +
+      `<code>${html(query)}</code>\n\n` +
+      `Try another spelling or a shorter movie name.`
     );
+
+    await scheduleDelete(
+      env,
+      message.chat.id,
+      response.result?.message_id
+    );
+
+    return;
   }
 
-  const buttons = results.map((movie) => [
+  const buttons = [];
+
+  for (const movie of results) {
+    buttons.push([
+      {
+        text:
+          `🎬 ${movie.title}` +
+          (movie.quality
+            ? ` • ${movie.quality}`
+            : ""),
+        callback_data: `movie:${movie.id}`
+      }
+    ]);
+  }
+
+  buttons.push([
     {
-      text:
-        `${movie.title}` +
-        (movie.quality ? ` • ${movie.quality}` : ""),
-      callback_data: `movie:${movie.id}`,
-    },
+      text: "🛍️ FLIPKART / AMAZON OFFERS",
+      url: env.OFFERS_URL
+    }
   ]);
 
-  const resultMessage = await sendMessage(
+  const response = await sendMessage(
     env,
-    chatId,
-    `🔍 <b>SEARCH RESULTS</b>\n\n` +
-      `Found ${results.length} result(s) for:\n` +
-      `<b>${escapeHtml(query)}</b>`,
+    message.chat.id,
+    `🔎 <b>Movie Search</b>\n\n` +
+    `Results for:\n` +
+    `<b>${html(query)}</b>\n\n` +
+    `Select a movie below:`,
     {
       reply_markup: {
-        inline_keyboard: buttons,
-      },
+        inline_keyboard: buttons
+      }
     }
   );
 
   await scheduleDelete(
     env,
-    chatId,
-    resultMessage.result?.message_id
+    message.chat.id,
+    response.result?.message_id
   );
-
-  return resultMessage;
 }
 
-function escapeHtml(value = "") {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-async function scheduleDelete(env, chatId, messageId) {
-  if (!messageId) return;
-
-  await env.DB.prepare(
-    `INSERT INTO settings (key, value)
-     VALUES (?, ?)
-     ON CONFLICT(key)
-     DO UPDATE SET value = value`
-  )
-    .bind(
-      `delete:${chatId}:${messageId}`,
-      String(now() + 300)
-    )
-    .run();
-}
+/* -----------------------------
+   MOVIE
+----------------------------- */
 
 async function getMovie(env, id) {
   return env.DB.prepare(
-    `SELECT * FROM movies WHERE id = ?`
+    "SELECT * FROM movies WHERE id = ?"
   )
     .bind(id)
     .first();
 }
 
-function movieDetails(movie) {
+function movieText(movie) {
   return (
-    `🎬 <b>${escapeHtml(movie.title)}</b>\n\n` +
-    `🌐 Language: ${escapeHtml(movie.language || "N/A")}\n` +
-    `🎞️ Season: ${escapeHtml(movie.season || "Movie")}\n` +
-    `🎥 Quality: ${escapeHtml(movie.quality || "N/A")}\n` +
-    `📁 File: ${escapeHtml(movie.file_name || "N/A")}`
+    `🎬 <b>${html(movie.title)}</b>\n\n` +
+    `🌐 Language: ${html(movie.language || "N/A")}\n` +
+    `🎞️ Season: ${html(movie.season || "Movie")}\n` +
+    `🎥 Quality: ${html(movie.quality || "N/A")}\n` +
+    `📁 File Name: ${html(movie.file_name || "N/A")}`
   );
 }
 
-async function deliverMovie(env, chatId, movie) {
-  if (movie.source_type === "terabox") {
-    const msg = await sendMessage(
+async function sendMovie(env, chatId, movie) {
+  const caption =
+    movieText(movie) +
+    `\n\n🔗 <b>ALL GROUP LINKS</b>`;
+
+  const replyMarkup = {
+    inline_keyboard: [
+      [
+        {
+          text: "👉 CLICK HERE",
+          url: env.MOVIE_GROUP_URL
+        }
+      ],
+      [
+        {
+          text: "🛍️ FLIPKART / AMAZON OFFERS",
+          url: env.OFFERS_URL
+        }
+      ]
+    ]
+  };
+
+  let response;
+
+  if (
+    movie.source_type === "terabox" &&
+    movie.terabox_url
+  ) {
+    response = await sendMessage(
       env,
       chatId,
-      `${movieDetails(movie)}\n\n🔗 <b>TERABOX LINK</b>`,
+      caption +
+        `\n\n🔗 <b>TERABOX LINK</b>`,
       {
         reply_markup: {
           inline_keyboard: [
             [
               {
                 text: "🔗 OPEN TERABOX",
-                url: movie.terabox_url,
-              },
+                url: movie.terabox_url
+              }
             ],
-          ],
-        },
+            [
+              {
+                text: "👉 ALL GROUP LINKS",
+                url: env.MOVIE_GROUP_URL
+              }
+            ]
+          ]
+        }
       }
     );
-
-    await scheduleDelete(
+  } else if (
+    movie.source_type === "video" &&
+    movie.telegram_file_id
+  ) {
+    response = await telegram(
       env,
-      chatId,
-      msg.result?.message_id
+      "sendVideo",
+      {
+        chat_id: chatId,
+        video: movie.telegram_file_id,
+        caption,
+        parse_mode: "HTML",
+        reply_markup: replyMarkup
+      }
     );
-
-    return msg;
-  }
-
-  if (!movie.telegram_file_id) {
-    return sendMessage(
+  } else if (movie.telegram_file_id) {
+    response = await telegram(
       env,
-      chatId,
-      "❌ Content file is not available."
+      "sendDocument",
+      {
+        chat_id: chatId,
+        document: movie.telegram_file_id,
+        caption,
+        parse_mode: "HTML",
+        reply_markup: replyMarkup
+      }
     );
-  }
-
-  let response;
-
-  const caption =
-    `${movieDetails(movie)}\n\n` +
-    `🎥 <b>ALL GROUP LINKS</b>`;
-
-  const keyboard = {
-    inline_keyboard: [
-      [
-        {
-          text: "👉 CLICK HERE",
-          url: env.MOVIE_GROUP_URL,
-        },
-      ],
-    ],
-  };
-
-  if (movie.source_type === "video") {
-    response = await telegram(env, "sendVideo", {
-      chat_id: chatId,
-      video: movie.telegram_file_id,
-      caption,
-      parse_mode: "HTML",
-      reply_markup: keyboard,
-    });
   } else {
-    response = await telegram(env, "sendDocument", {
-      chat_id: chatId,
-      document: movie.telegram_file_id,
-      caption,
-      parse_mode: "HTML",
-      reply_markup: keyboard,
-    });
+    response = await sendMessage(
+      env,
+      chatId,
+      `❌ <b>File Not Available</b>\n\n` +
+      `The movie was found, but no file/link is available.`
+    );
   }
 
-  if (response.ok && response.result?.message_id) {
+  if (
+    response?.ok &&
+    response.result?.message_id
+  ) {
     await scheduleDelete(
       env,
       chatId,
@@ -369,265 +421,187 @@ async function deliverMovie(env, chatId, movie) {
   return response;
 }
 
-async function handleCallback(env, callback) {
-  const data = callback.data;
-  const chatId = callback.message?.chat?.id;
-  const userId = callback.from?.id;
+/* -----------------------------
+   DELETE QUEUE
+----------------------------- */
 
-  await telegram(env, "answerCallbackQuery", {
-    callback_query_id: callback.id,
-  });
+async function scheduleDelete(
+  env,
+  chatId,
+  messageId
+) {
+  if (!messageId) return;
 
-  if (data === "check_join") {
-    const joined = await isUserJoined(env, userId);
+  const key =
+    `delete:${chatId}:${messageId}`;
 
-    if (!joined) {
-      await telegram(env, "editMessageText", {
-        chat_id: chatId,
-        message_id: callback.message.message_id,
-        text:
-          "❌ <b>You have not joined the channel yet.</b>\n\n" +
-          "Please join the channel first.",
-        parse_mode: "HTML",
-        reply_markup: await forceJoinKeyboard(env),
-      });
+  const deleteAt =
+    currentTime() + DELETE_AFTER_SECONDS;
 
-      return;
+  await env.DB.prepare(
+    `INSERT OR REPLACE INTO settings
+     (key, value)
+     VALUES (?, ?)`
+  )
+    .bind(key, String(deleteAt))
+    .run();
+}
+
+async function cleanupMessages(env) {
+  const current = currentTime();
+
+  const result = await env.DB.prepare(
+    `SELECT key
+     FROM settings
+     WHERE key LIKE 'delete:%'
+     AND CAST(value AS INTEGER) <= ?`
+  )
+    .bind(current)
+    .all();
+
+  for (const row of result.results || []) {
+    const parts = row.key.split(":");
+
+    if (parts.length >= 3) {
+      const chatId = parts[1];
+      const messageId = Number(
+        parts.slice(2).join(":")
+      );
+
+      await deleteMessage(
+        env,
+        chatId,
+        messageId
+      );
     }
 
-    await telegram(env, "editMessageText", {
-      chat_id: chatId,
-      message_id: callback.message.message_id,
-      text:
-        "✅ <b>Verified!</b>\n\n" +
-        "You can now search and access available content.",
-      parse_mode: "HTML",
-      reply_markup: await mainMenu(env),
-    });
-
-    return;
-  }
-
-  if (data === "about") {
-    await sendMessage(
-      env,
-      chatId,
-      `<b>🎬 MOVIEDETA BOT</b>\n\n` +
-        `🔍 Fast Search\n` +
-        `📺 Telegram Source Support\n` +
-        `🔗 TeraBox Link Support\n` +
-        `🔒 Channel Verification\n` +
-        `⚡ Automatic Cleanup\n\n` +
-        `<b>Free for everyone.</b>`
-    );
-    return;
-  }
-
-  if (data === "referral") {
-    const user = await env.DB.prepare(
-      "SELECT referral_code FROM users WHERE user_id = ?"
+    await env.DB.prepare(
+      "DELETE FROM settings WHERE key = ?"
     )
-      .bind(userId)
-      .first();
-
-    const code =
-      user?.referral_code ||
-      Math.random().toString(36).slice(2, 10);
-
-    const link =
-      `https://t.me/${env.BOT_USERNAME}?start=${code}`;
-
-    await sendMessage(
-      env,
-      chatId,
-      `<b>👥 YOUR REFERRAL LINK</b>\n\n` +
-        `<code>${escapeHtml(link)}</code>`
-    );
-
-    return;
-  }
-
-  if (data.startsWith("movie:")) {
-    const movieId = Number(data.split(":")[1]);
-
-    const movie = await getMovie(env, movieId);
-
-    if (!movie) {
-      await sendMessage(
-        env,
-        chatId,
-        "❌ Content not found."
-      );
-      return;
-    }
-
-    const joined = await isUserJoined(env, userId);
-
-    if (!joined) {
-      await sendMessage(
-        env,
-        chatId,
-        "🔒 <b>JOIN REQUIRED</b>\n\n" +
-          "Please join our channel before accessing this content.",
-        {
-          reply_markup: await forceJoinKeyboard(env),
-        }
-      );
-
-      return;
-    }
-
-    await deliverMovie(env, chatId, movie);
+      .bind(row.key)
+      .run();
   }
 }
 
-async function processUpdate(env, update) {
-  if (update.callback_query) {
-    return handleCallback(env, update.callback_query);
-  }
+/* -----------------------------
+   CHANNEL INDEXING
+----------------------------- */
 
-  if (update.channel_post) {
-    return handleChannelPost(env, update.channel_post);
-  }
+function extractTeraBox(text = "") {
+  const match = text.match(
+    /https?:\/\/(?:www\.)?terabox\.com\/[^\s]+/i
+  );
 
-  if (!update.message) {
-    return;
-  }
-
-  const message = update.message;
-  const chatId = message.chat.id;
-  const user = message.from;
-
-  if (user) {
-    await upsertUser(env, user);
-  }
-
-  if (message.text?.startsWith("/start")) {
-    const parts = message.text.split(" ");
-    const referralCode = parts[1] || null;
-
-    if (referralCode && user) {
-      await upsertUser(env, user, referralCode);
-    }
-
-    await sendMessage(
-      env,
-      chatId,
-      `<b>👋 Welcome to MovieDeta Bot!</b>\n\n` +
-        `🎬 Search available content quickly.\n` +
-        `⚡ Fast • Free • Easy`,
-      {
-        reply_markup: await mainMenu(env),
-      }
-    );
-
-    return;
-  }
-
-  if (message.text === "/help") {
-    await sendMessage(
-      env,
-      chatId,
-      `<b>🆘 HELP</b>\n\nPlease contact support:`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: "🆘 CONTACT SUPPORT",
-                url: env.HELP_URL,
-              },
-            ],
-          ],
-        },
-      }
-    );
-
-    return;
-  }
-
-  if (message.chat.type === "group" ||
-      message.chat.type === "supergroup") {
-
-    if (!message.text) {
-      return;
-    }
-
-    const text = message.text.trim();
-
-    if (text.startsWith("/")) {
-      return;
-    }
-
-    await sendSearchResults(
-      env,
-      chatId,
-      text
-    );
-
-    return;
-  }
+  return match ? match[0] : null;
 }
 
-async function handleChannelPost(env, post) {
-  const source = post.chat.username
-    ? `@${post.chat.username}`
-    : String(post.chat.id);
+function parseMovieInfo(text, fallbackFileName) {
+  const lines = text
+    .split("\n")
+    .map(x => x.trim())
+    .filter(Boolean);
 
-  const messageId = post.message_id;
+  let title = "";
+  let language = null;
+  let season = null;
+  let quality = null;
 
-  let sourceType = null;
-  let fileId = null;
-  let fileName = null;
-
-  if (post.video?.file_id) {
-    sourceType = "video";
-    fileId = post.video.file_id;
-    fileName =
-      post.video.file_name ||
-      `video_${messageId}.mp4`;
-  } else if (post.document?.file_id) {
-    sourceType = "telegram";
-    fileId = post.document.file_id;
-    fileName =
-      post.document.file_name ||
-      `document_${messageId}`;
+  if (lines.length) {
+    title = lines[0]
+      .replace(/^🎬\s*/i, "")
+      .trim();
   }
 
+  for (const line of lines) {
+    if (/language\s*:/i.test(line)) {
+      language =
+        line.split(":").slice(1).join(":").trim();
+    }
+
+    if (/season\s*:/i.test(line)) {
+      season =
+        line.split(":").slice(1).join(":").trim();
+    }
+
+    if (/quality\s*:/i.test(line)) {
+      quality =
+        line.split(":").slice(1).join(":").trim();
+    }
+  }
+
+  if (!title) {
+    title = fallbackFileName || "Unknown Movie";
+  }
+
+  return {
+    title,
+    language,
+    season,
+    quality
+  };
+}
+
+async function indexChannelPost(env, post) {
   const text =
     post.caption ||
     post.text ||
     "";
 
-  if (!text && !fileId) {
+  let fileId = null;
+  let fileName = null;
+  let sourceType = null;
+
+  if (post.video?.file_id) {
+    fileId = post.video.file_id;
+    fileName =
+      post.video.file_name ||
+      `video_${post.message_id}.mp4`;
+    sourceType = "video";
+  }
+
+  if (post.document?.file_id) {
+    fileId = post.document.file_id;
+    fileName =
+      post.document.file_name ||
+      `document_${post.message_id}`;
+    sourceType = "telegram";
+  }
+
+  const teraboxUrl =
+    extractTeraBox(text);
+
+  if (!fileId && !teraboxUrl) {
     return;
   }
 
-  const firstLine =
-    text
-      .split("\n")[0]
-      ?.replace(/^🎬\s*/i, "")
-      .trim() ||
-    fileName ||
-    `Content ${messageId}`;
+  if (teraboxUrl) {
+    sourceType = "terabox";
+  }
 
-  const title =
-    firstLine.split("|")[0].trim();
+  const info = parseMovieInfo(
+    text,
+    fileName
+  );
 
-  const normalizedTitle =
-    normalizeText(title);
+  const sourceChannel =
+    post.chat.username
+      ? `@${post.chat.username}`
+      : String(post.chat.id);
 
-  const existing = await env.DB.prepare(
+  const duplicate = await env.DB.prepare(
     `SELECT id
      FROM movies
      WHERE title = ?
-       AND source_channel = ?
+     AND source_channel = ?
      LIMIT 1`
   )
-    .bind(title, source)
+    .bind(
+      normalize(info.title),
+      sourceChannel
+    )
     .first();
 
-  if (existing) {
+  if (duplicate) {
     return;
   }
 
@@ -648,61 +622,275 @@ async function handleChannelPost(env, post) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
-      normalizedTitle || title,
-      null,
-      null,
-      null,
+      normalize(info.title),
+      info.language,
+      info.season,
+      info.quality,
       fileName,
       fileId,
-      extractTeraBox(text),
-      extractTeraBox(text) ? "terabox" : sourceType || "telegram",
-      source,
-      now()
+      teraboxUrl,
+      sourceType,
+      sourceChannel,
+      currentTime()
     )
     .run();
 }
 
-function extractTeraBox(text = "") {
-  const match = text.match(
-    /https?:\/\/(?:www\.)?terabox\.com\/\S+/i
+/* -----------------------------
+   CALLBACKS
+----------------------------- */
+
+async function handleCallback(env, callback) {
+  const data = callback.data;
+  const userId = callback.from.id;
+  const chatId = callback.message.chat.id;
+
+  await telegram(
+    env,
+    "answerCallbackQuery",
+    {
+      callback_query_id: callback.id
+    }
   );
 
-  return match ? match[0] : null;
-}
+  if (data === "check_join") {
+    const joined =
+      await checkMembership(env, userId);
 
-async function cleanupExpired(env) {
-  const cutoff = now();
-
-  const result = await env.DB.prepare(
-    `SELECT key, value
-     FROM settings
-     WHERE key LIKE 'delete:%'
-       AND CAST(value AS INTEGER) <= ?`
-  )
-    .bind(cutoff)
-    .all();
-
-  for (const row of result.results || []) {
-    const parts = row.key.split(":");
-
-    if (parts.length >= 3) {
-      const chatId = parts[1];
-      const messageId = Number(parts.slice(2).join(":"));
-
-      await deleteMessage(
+    if (!joined) {
+      await sendMessage(
         env,
         chatId,
-        messageId
+        `❌ <b>You have not joined the channel.</b>\n\n` +
+        `Join the channel and press CHECK JOIN again.`,
+        {
+          reply_markup:
+            joinKeyboard(env)
+        }
+      );
+
+      return;
+    }
+
+    await sendMessage(
+      env,
+      chatId,
+      `✅ <b>Verification Successful</b>\n\n` +
+      `You can now access the movie.`,
+      {
+        reply_markup:
+          mainKeyboard(env)
+      }
+    );
+
+    return;
+  }
+
+  if (data === "about") {
+    await sendMessage(
+      env,
+      chatId,
+      `<b>🎬 MOVIEDETA BOT</b>\n\n` +
+      `🔎 Movie Search\n` +
+      `📺 Telegram File Support\n` +
+      `🔗 TeraBox Support\n` +
+      `🔐 Channel Verification\n` +
+      `🧹 Automatic Message Cleanup\n\n` +
+      `<b>Free to use.</b>`
+    );
+
+    return;
+  }
+
+  if (data === "referral") {
+    const user =
+      await env.DB.prepare(
+        `SELECT referral_code
+         FROM users
+         WHERE user_id = ?`
+      )
+      .bind(userId)
+      .first();
+
+    if (!user) return;
+
+    const referralLink =
+      `https://t.me/${env.BOT_USERNAME}?start=${user.referral_code}`;
+
+    await sendMessage(
+      env,
+      chatId,
+      `<b>👥 YOUR REFERRAL LINK</b>\n\n` +
+      `<code>${html(referralLink)}</code>`
+    );
+
+    return;
+  }
+
+  if (data.startsWith("movie:")) {
+    const movieId =
+      Number(data.split(":")[1]);
+
+    const movie =
+      await getMovie(env, movieId);
+
+    if (!movie) {
+      await sendMessage(
+        env,
+        chatId,
+        `❌ <b>Movie not found.</b>`
+      );
+
+      return;
+    }
+
+    const joined =
+      await checkMembership(env, userId);
+
+    if (!joined) {
+      await sendMessage(
+        env,
+        chatId,
+        `🔒 <b>JOIN REQUIRED</b>\n\n` +
+        `Please join our channel before accessing this movie.`,
+        {
+          reply_markup:
+            joinKeyboard(env)
+        }
+      );
+
+      return;
+    }
+
+    await sendMovie(
+      env,
+      chatId,
+      movie
+    );
+  }
+}
+
+/* -----------------------------
+   COMMANDS
+----------------------------- */
+
+async function handlePrivateMessage(
+  env,
+  message
+) {
+  const text =
+    message.text?.trim() || "";
+
+  const chatId =
+    message.chat.id;
+
+  if (text.startsWith("/start")) {
+    await sendMessage(
+      env,
+      chatId,
+      `<b>🎬 Welcome to MovieDeta Bot!</b>\n\n` +
+      `Search movies quickly and easily.\n\n` +
+      `Use this bot for free.`,
+      {
+        reply_markup:
+          mainKeyboard(env)
+      }
+    );
+
+    return;
+  }
+
+  if (text === "/help") {
+    await sendMessage(
+      env,
+      chatId,
+      `<b>🆘 HELP</b>\n\n` +
+      `Search for a movie from the group.\n` +
+      `Select the movie result.\n` +
+      `Join the required channel.\n` +
+      `Then access the available content.`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "🆘 CONTACT SUPPORT",
+                url: env.HELP_URL
+              }
+            ]
+          ]
+        }
+      }
+    );
+
+    return;
+  }
+}
+
+/* -----------------------------
+   UPDATE HANDLER
+----------------------------- */
+
+async function processUpdate(env, update) {
+  if (update.callback_query) {
+    return handleCallback(
+      env,
+      update.callback_query
+    );
+  }
+
+  if (update.channel_post) {
+    return indexChannelPost(
+      env,
+      update.channel_post
+    );
+  }
+
+  if (!update.message) {
+    return;
+  }
+
+  const message =
+    update.message;
+
+  if (message.from) {
+    await saveUser(
+      env,
+      message.from
+    );
+  }
+
+  const chatType =
+    message.chat?.type;
+
+  if (
+    chatType === "group" ||
+    chatType === "supergroup"
+  ) {
+    if (
+      message.text &&
+      !message.text.startsWith("/")
+    ) {
+      return searchFromGroup(
+        env,
+        message
       );
     }
 
-    await env.DB.prepare(
-      "DELETE FROM settings WHERE key = ?"
-    )
-      .bind(row.key)
-      .run();
+    return;
+  }
+
+  if (chatType === "private") {
+    return handlePrivateMessage(
+      env,
+      message
+    );
   }
 }
+
+/* -----------------------------
+   WORKER
+----------------------------- */
 
 export default {
   async fetch(request, env) {
@@ -713,30 +901,42 @@ export default {
     }
 
     if (request.method !== "POST") {
-      return new Response("Method Not Allowed", {
-        status: 405,
-      });
+      return new Response(
+        "Method Not Allowed",
+        {
+          status: 405
+        }
+      );
     }
 
     try {
-      const update = await request.json();
+      const update =
+        await request.json();
 
-      await processUpdate(env, update);
+      await processUpdate(
+        env,
+        update
+      );
 
-      return json({
-        ok: true,
+      return Response.json({
+        ok: true
       });
     } catch (error) {
       console.error(error);
 
-      return json({
-        ok: false,
-        error: error.message,
-      });
+      return Response.json(
+        {
+          ok: false,
+          error: error.message
+        },
+        {
+          status: 500
+        }
+      );
     }
   },
 
   async scheduled(event, env) {
-    await cleanupExpired(env);
-  },
+    await cleanupMessages(env);
+  }
 };
