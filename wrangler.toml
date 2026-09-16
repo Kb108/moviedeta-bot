@@ -15,4 +15,4 @@ OFFERS_URL = "https://t.me/loot_dells"
 [[d1_databases]]
 binding = "DB"
 database_name = "moviedeta-db"
-database_id = "YOUR_DATABASE_ID"
+database_id = "a7cb0ec4-00c1-46ee-b7b8-73a897dd436c"
