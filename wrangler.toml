@@ -2,5 +2,17 @@ name = "moviedeta-bot"
 main = "src/index.js"
 compatibility_date = "2026-09-16"
 
+[triggers]
+crons = ["* * * * *"]
+
 [vars]
 BOT_USERNAME = "Moviedeta_bot"
+FORCE_JOIN_CHANNEL = "@loot_dells"
+MOVIE_GROUP_URL = "https://t.me/MovieUpdateHD"
+HELP_URL = "https://t.me/share_kb"
+OFFERS_URL = "https://t.me/loot_dells"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "moviedeta-db"
+database_id = "YOUR_DATABASE_ID"
