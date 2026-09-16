@@ -1,0 +1,6 @@
+name = "moviedeta-bot"
+main = "src/index.js"
+compatibility_date = "2026-09-16"
+
+[vars]
+BOT_USERNAME = "Moviedeta_bot"
