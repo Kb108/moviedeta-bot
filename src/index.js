@@ -7,7 +7,7 @@ function currentTime() {
   return Math.floor(Date.now() / 1000);
 }
 
-function html(value = "") {
+function escapeHtml(value = "") {
   return String(value)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -55,9 +55,9 @@ async function deleteMessage(env, chatId, messageId) {
   });
 }
 
-/* -----------------------------
-   USER
------------------------------ */
+/* =========================
+   USER DATABASE
+========================= */
 
 async function saveUser(env, user) {
   if (!user?.id) return;
@@ -85,7 +85,9 @@ async function saveUser(env, user) {
   }
 
   const referralCode =
-    Math.random().toString(36).substring(2, 10);
+    Math.random()
+      .toString(36)
+      .substring(2, 10);
 
   await env.DB.prepare(
     `INSERT INTO users
@@ -102,9 +104,9 @@ async function saveUser(env, user) {
     .run();
 }
 
-/* -----------------------------
+/* =========================
    FORCE JOIN
------------------------------ */
+========================= */
 
 async function checkMembership(env, userId) {
   try {
@@ -128,6 +130,7 @@ async function checkMembership(env, userId) {
       "administrator",
       "member"
     ].includes(status);
+
   } catch {
     return false;
   }
@@ -155,9 +158,9 @@ function joinKeyboard(env) {
   };
 }
 
-/* -----------------------------
+/* =========================
    MAIN MENU
------------------------------ */
+========================= */
 
 function mainKeyboard(env) {
   return {
@@ -190,18 +193,20 @@ function mainKeyboard(env) {
   };
 }
 
-/* -----------------------------
-   SEARCH
------------------------------ */
+/* =========================
+   MOVIE SEARCH
+========================= */
 
 async function searchMovies(env, query) {
-  const normalized = normalize(query);
+  const normalized =
+    normalize(query);
 
   if (!normalized) {
     return [];
   }
 
-  const words = normalized.split(" ");
+  const words =
+    normalized.split(" ");
 
   let sql = `
     SELECT *
@@ -221,29 +226,40 @@ async function searchMovies(env, query) {
     LIMIT 20
   `;
 
-  const result = await env.DB.prepare(sql)
-    .bind(...params)
-    .all();
+  const result =
+    await env.DB.prepare(sql)
+      .bind(...params)
+      .all();
 
   return result.results || [];
 }
 
-async function searchFromGroup(env, message) {
-  const query = message.text?.trim();
+async function searchFromGroup(
+  env,
+  message
+) {
+  const query =
+    message.text?.trim();
 
   if (!query) return;
 
-  const results = await searchMovies(env, query);
+  const results =
+    await searchMovies(
+      env,
+      query
+    );
 
   if (!results.length) {
-    const response = await sendMessage(
-      env,
-      message.chat.id,
-      `❌ <b>Movie Not Found</b>\n\n` +
-      `No movie found for:\n` +
-      `<code>${html(query)}</code>\n\n` +
-      `Try another spelling or a shorter movie name.`
-    );
+
+    const response =
+      await sendMessage(
+        env,
+        message.chat.id,
+        `❌ <b>Movie Not Found</b>\n\n` +
+        `No movie found for:\n` +
+        `<code>${escapeHtml(query)}</code>\n\n` +
+        `Please check the spelling and try again.`
+      );
 
     await scheduleDelete(
       env,
@@ -257,38 +273,50 @@ async function searchFromGroup(env, message) {
   const buttons = [];
 
   for (const movie of results) {
+
     buttons.push([
       {
         text:
           `🎬 ${movie.title}` +
-          (movie.quality
-            ? ` • ${movie.quality}`
-            : ""),
-        callback_data: `movie:${movie.id}`
+          (
+            movie.quality
+              ? ` • ${movie.quality}`
+              : ""
+          ),
+
+        callback_data:
+          `movie:${movie.id}`
       }
     ]);
   }
 
   buttons.push([
     {
-      text: "🛍️ FLIPKART / AMAZON OFFERS",
-      url: env.OFFERS_URL
+      text:
+        "🛍️ FLIPKART / AMAZON OFFERS",
+
+      url:
+        env.OFFERS_URL
     }
   ]);
 
-  const response = await sendMessage(
-    env,
-    message.chat.id,
-    `🔎 <b>Movie Search</b>\n\n` +
-    `Results for:\n` +
-    `<b>${html(query)}</b>\n\n` +
-    `Select a movie below:`,
-    {
-      reply_markup: {
-        inline_keyboard: buttons
+  const response =
+    await sendMessage(
+      env,
+      message.chat.id,
+
+      `🔎 <b>Movie Search</b>\n\n` +
+      `Results for:\n` +
+      `<b>${escapeHtml(query)}</b>\n\n` +
+      `Select a movie below:`,
+
+      {
+        reply_markup: {
+          inline_keyboard:
+            buttons
+        }
       }
-    }
-  );
+    );
 
   await scheduleDelete(
     env,
@@ -297,11 +325,14 @@ async function searchFromGroup(env, message) {
   );
 }
 
-/* -----------------------------
-   MOVIE
------------------------------ */
+/* =========================
+   GET MOVIE
+========================= */
 
-async function getMovie(env, id) {
+async function getMovie(
+  env,
+  id
+) {
   return env.DB.prepare(
     "SELECT * FROM movies WHERE id = ?"
   )
@@ -310,16 +341,46 @@ async function getMovie(env, id) {
 }
 
 function movieText(movie) {
+
   return (
-    `🎬 <b>${html(movie.title)}</b>\n\n` +
-    `🌐 Language: ${html(movie.language || "N/A")}\n` +
-    `🎞️ Season: ${html(movie.season || "Movie")}\n` +
-    `🎥 Quality: ${html(movie.quality || "N/A")}\n` +
-    `📁 File Name: ${html(movie.file_name || "N/A")}`
+    `🎬 <b>${escapeHtml(movie.title)}</b>\n\n` +
+
+    `🌐 Language: ${
+      escapeHtml(
+        movie.language || "N/A"
+      )
+    }\n` +
+
+    `🎞️ Season: ${
+      escapeHtml(
+        movie.season || "Movie"
+      )
+    }\n` +
+
+    `🎥 Quality: ${
+      escapeHtml(
+        movie.quality || "N/A"
+      )
+    }\n` +
+
+    `📁 File Name: ${
+      escapeHtml(
+        movie.file_name || "N/A"
+      )
+    }`
   );
 }
 
-async function sendMovie(env, chatId, movie) {
+/* =========================
+   SEND MOVIE
+========================= */
+
+async function sendMovie(
+  env,
+  chatId,
+  movie
+) {
+
   const caption =
     movieText(movie) +
     `\n\n🔗 <b>ALL GROUP LINKS</b>`;
@@ -334,7 +395,8 @@ async function sendMovie(env, chatId, movie) {
       ],
       [
         {
-          text: "🛍️ FLIPKART / AMAZON OFFERS",
+          text:
+            "🛍️ FLIPKART / AMAZON OFFERS",
           url: env.OFFERS_URL
         }
       ]
@@ -343,74 +405,122 @@ async function sendMovie(env, chatId, movie) {
 
   let response;
 
+  /* TeraBox */
+
   if (
     movie.source_type === "terabox" &&
     movie.terabox_url
   ) {
-    response = await sendMessage(
-      env,
-      chatId,
-      caption +
+
+    response =
+      await sendMessage(
+        env,
+        chatId,
+
+        caption +
         `\n\n🔗 <b>TERABOX LINK</b>`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: "🔗 OPEN TERABOX",
-                url: movie.terabox_url
-              }
-            ],
-            [
-              {
-                text: "👉 ALL GROUP LINKS",
-                url: env.MOVIE_GROUP_URL
-              }
+
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text:
+                    "🔗 OPEN TERABOX",
+
+                  url:
+                    movie.terabox_url
+                }
+              ],
+              [
+                {
+                  text:
+                    "👉 ALL GROUP LINKS",
+
+                  url:
+                    env.MOVIE_GROUP_URL
+                }
+              ]
             ]
-          ]
+          }
         }
-      }
-    );
-  } else if (
+      );
+  }
+
+  /* Telegram Video */
+
+  else if (
     movie.source_type === "video" &&
     movie.telegram_file_id
   ) {
-    response = await telegram(
-      env,
-      "sendVideo",
-      {
-        chat_id: chatId,
-        video: movie.telegram_file_id,
-        caption,
-        parse_mode: "HTML",
-        reply_markup: replyMarkup
-      }
-    );
-  } else if (movie.telegram_file_id) {
-    response = await telegram(
-      env,
-      "sendDocument",
-      {
-        chat_id: chatId,
-        document: movie.telegram_file_id,
-        caption,
-        parse_mode: "HTML",
-        reply_markup: replyMarkup
-      }
-    );
-  } else {
-    response = await sendMessage(
-      env,
-      chatId,
-      `❌ <b>File Not Available</b>\n\n` +
-      `The movie was found, but no file/link is available.`
-    );
+
+    response =
+      await telegram(
+        env,
+        "sendVideo",
+        {
+          chat_id: chatId,
+
+          video:
+            movie.telegram_file_id,
+
+          caption,
+
+          parse_mode:
+            "HTML",
+
+          reply_markup:
+            replyMarkup
+        }
+      );
   }
+
+  /* Telegram Document */
+
+  else if (
+    movie.telegram_file_id
+  ) {
+
+    response =
+      await telegram(
+        env,
+        "sendDocument",
+        {
+          chat_id: chatId,
+
+          document:
+            movie.telegram_file_id,
+
+          caption,
+
+          parse_mode:
+            "HTML",
+
+          reply_markup:
+            replyMarkup
+        }
+      );
+  }
+
+  else {
+
+    response =
+      await sendMessage(
+        env,
+        chatId,
+
+        `❌ <b>File Not Available</b>\n\n` +
+        `The movie was found, but no file/link is available.`
+      );
+  }
+
+  /* Schedule deletion */
 
   if (
     response?.ok &&
     response.result?.message_id
   ) {
+
     await scheduleDelete(
       env,
       chatId,
@@ -421,52 +531,73 @@ async function sendMovie(env, chatId, movie) {
   return response;
 }
 
-/* -----------------------------
+/* =========================
    DELETE QUEUE
------------------------------ */
+========================= */
 
 async function scheduleDelete(
   env,
   chatId,
   messageId
 ) {
+
   if (!messageId) return;
 
   const key =
     `delete:${chatId}:${messageId}`;
 
   const deleteAt =
-    currentTime() + DELETE_AFTER_SECONDS;
+    currentTime() +
+    DELETE_AFTER_SECONDS;
 
   await env.DB.prepare(
     `INSERT OR REPLACE INTO settings
      (key, value)
      VALUES (?, ?)`
   )
-    .bind(key, String(deleteAt))
+    .bind(
+      key,
+      String(deleteAt)
+    )
     .run();
 }
 
-async function cleanupMessages(env) {
-  const current = currentTime();
+async function cleanupMessages(
+  env
+) {
 
-  const result = await env.DB.prepare(
-    `SELECT key
-     FROM settings
-     WHERE key LIKE 'delete:%'
-     AND CAST(value AS INTEGER) <= ?`
-  )
-    .bind(current)
-    .all();
+  const current =
+    currentTime();
 
-  for (const row of result.results || []) {
-    const parts = row.key.split(":");
+  const result =
+    await env.DB.prepare(
+      `SELECT key
+       FROM settings
+       WHERE key LIKE 'delete:%'
+       AND CAST(value AS INTEGER) <= ?`
+    )
+      .bind(current)
+      .all();
+
+  for (
+    const row
+    of result.results || []
+  ) {
+
+    const parts =
+      row.key.split(":");
 
     if (parts.length >= 3) {
-      const chatId = parts[1];
-      const messageId = Number(
-        parts.slice(2).join(":")
-      );
+
+      const chatId =
+        parts[1];
+
+      const messageId =
+        Number(
+          parts
+            .slice(2)
+            .join(":")
+        );
 
       await deleteMessage(
         env,
@@ -483,23 +614,36 @@ async function cleanupMessages(env) {
   }
 }
 
-/* -----------------------------
+/* =========================
    CHANNEL INDEXING
------------------------------ */
+========================= */
 
-function extractTeraBox(text = "") {
-  const match = text.match(
-    /https?:\/\/(?:www\.)?terabox\.com\/[^\s]+/i
-  );
+function extractTeraBox(
+  text = ""
+) {
 
-  return match ? match[0] : null;
+  const match =
+    text.match(
+      /https?:\/\/(?:www\.)?terabox\.com\/[^\s]+/i
+    );
+
+  return match
+    ? match[0]
+    : null;
 }
 
-function parseMovieInfo(text, fallbackFileName) {
-  const lines = text
-    .split("\n")
-    .map(x => x.trim())
-    .filter(Boolean);
+function parseMovieInfo(
+  text,
+  fallbackFileName
+) {
+
+  const lines =
+    text
+      .split("\n")
+      .map(
+        x => x.trim()
+      )
+      .filter(Boolean);
 
   let title = "";
   let language = null;
@@ -507,30 +651,66 @@ function parseMovieInfo(text, fallbackFileName) {
   let quality = null;
 
   if (lines.length) {
-    title = lines[0]
-      .replace(/^🎬\s*/i, "")
-      .trim();
+
+    title =
+      lines[0]
+        .replace(
+          /^🎬\s*/i,
+          ""
+        )
+        .trim();
   }
 
-  for (const line of lines) {
-    if (/language\s*:/i.test(line)) {
+  for (
+    const line
+    of lines
+  ) {
+
+    if (
+      /language\s*:/i
+        .test(line)
+    ) {
+
       language =
-        line.split(":").slice(1).join(":").trim();
+        line
+          .split(":")
+          .slice(1)
+          .join(":")
+          .trim();
     }
 
-    if (/season\s*:/i.test(line)) {
+    if (
+      /season\s*:/i
+        .test(line)
+    ) {
+
       season =
-        line.split(":").slice(1).join(":").trim();
+        line
+          .split(":")
+          .slice(1)
+          .join(":")
+          .trim();
     }
 
-    if (/quality\s*:/i.test(line)) {
+    if (
+      /quality\s*:/i
+        .test(line)
+    ) {
+
       quality =
-        line.split(":").slice(1).join(":").trim();
+        line
+          .split(":")
+          .slice(1)
+          .join(":")
+          .trim();
     }
   }
 
   if (!title) {
-    title = fallbackFileName || "Unknown Movie";
+
+    title =
+      fallbackFileName ||
+      "Unknown Movie";
   }
 
   return {
@@ -541,7 +721,11 @@ function parseMovieInfo(text, fallbackFileName) {
   };
 }
 
-async function indexChannelPost(env, post) {
+async function indexChannelPost(
+  env,
+  post
+) {
+
   const text =
     post.caption ||
     post.text ||
@@ -551,55 +735,77 @@ async function indexChannelPost(env, post) {
   let fileName = null;
   let sourceType = null;
 
+  /* Video */
+
   if (post.video?.file_id) {
-    fileId = post.video.file_id;
+
+    fileId =
+      post.video.file_id;
+
     fileName =
       post.video.file_name ||
       `video_${post.message_id}.mp4`;
-    sourceType = "video";
+
+    sourceType =
+      "video";
   }
 
+  /* Document */
+
   if (post.document?.file_id) {
-    fileId = post.document.file_id;
+
+    fileId =
+      post.document.file_id;
+
     fileName =
       post.document.file_name ||
       `document_${post.message_id}`;
-    sourceType = "telegram";
+
+    sourceType =
+      "telegram";
   }
+
+  /* TeraBox */
 
   const teraboxUrl =
     extractTeraBox(text);
 
-  if (!fileId && !teraboxUrl) {
+  if (
+    !fileId &&
+    !teraboxUrl
+  ) {
     return;
   }
 
   if (teraboxUrl) {
-    sourceType = "terabox";
+    sourceType =
+      "terabox";
   }
 
-  const info = parseMovieInfo(
-    text,
-    fileName
-  );
+  const info =
+    parseMovieInfo(
+      text,
+      fileName
+    );
 
   const sourceChannel =
     post.chat.username
       ? `@${post.chat.username}`
       : String(post.chat.id);
 
-  const duplicate = await env.DB.prepare(
-    `SELECT id
-     FROM movies
-     WHERE title = ?
-     AND source_channel = ?
-     LIMIT 1`
-  )
-    .bind(
-      normalize(info.title),
-      sourceChannel
+  const duplicate =
+    await env.DB.prepare(
+      `SELECT id
+       FROM movies
+       WHERE title = ?
+       AND source_channel = ?
+       LIMIT 1`
     )
-    .first();
+      .bind(
+        normalize(info.title),
+        sourceChannel
+      )
+      .first();
 
   if (duplicate) {
     return;
@@ -636,33 +842,54 @@ async function indexChannelPost(env, post) {
     .run();
 }
 
-/* -----------------------------
-   CALLBACKS
------------------------------ */
+/* =========================
+   CALLBACK BUTTONS
+========================= */
 
-async function handleCallback(env, callback) {
-  const data = callback.data;
-  const userId = callback.from.id;
-  const chatId = callback.message.chat.id;
+async function handleCallback(
+  env,
+  callback
+) {
+
+  const data =
+    callback.data;
+
+  const userId =
+    callback.from.id;
+
+  const chatId =
+    callback.message.chat.id;
 
   await telegram(
     env,
     "answerCallbackQuery",
     {
-      callback_query_id: callback.id
+      callback_query_id:
+        callback.id
     }
   );
 
-  if (data === "check_join") {
+  /* Check Join */
+
+  if (
+    data === "check_join"
+  ) {
+
     const joined =
-      await checkMembership(env, userId);
+      await checkMembership(
+        env,
+        userId
+      );
 
     if (!joined) {
+
       await sendMessage(
         env,
         chatId,
+
         `❌ <b>You have not joined the channel.</b>\n\n` +
         `Join the channel and press CHECK JOIN again.`,
+
         {
           reply_markup:
             joinKeyboard(env)
@@ -675,8 +902,10 @@ async function handleCallback(env, callback) {
     await sendMessage(
       env,
       chatId,
+
       `✅ <b>Verification Successful</b>\n\n` +
       `You can now access the movie.`,
+
       {
         reply_markup:
           mainKeyboard(env)
@@ -686,23 +915,12 @@ async function handleCallback(env, callback) {
     return;
   }
 
-  if (data === "about") {
-    await sendMessage(
-      env,
-      chatId,
-      `<b>🎬 MOVIEDETA BOT</b>\n\n` +
-      `🔎 Movie Search\n` +
-      `📺 Telegram File Support\n` +
-      `🔗 TeraBox Support\n` +
-      `🔐 Channel Verification\n` +
-      `🧹 Automatic Message Cleanup\n\n` +
-      `<b>Free to use.</b>`
-    );
+  /* Referral */
 
-    return;
-  }
+  if (
+    data === "referral"
+  ) {
 
-  if (data === "referral") {
     const user =
       await env.DB.prepare(
         `SELECT referral_code
@@ -714,27 +932,39 @@ async function handleCallback(env, callback) {
 
     if (!user) return;
 
-    const referralLink =
+    const link =
       `https://t.me/${env.BOT_USERNAME}?start=${user.referral_code}`;
 
     await sendMessage(
       env,
       chatId,
+
       `<b>👥 YOUR REFERRAL LINK</b>\n\n` +
-      `<code>${html(referralLink)}</code>`
+      `<code>${escapeHtml(link)}</code>`
     );
 
     return;
   }
 
-  if (data.startsWith("movie:")) {
+  /* Movie */
+
+  if (
+    data.startsWith("movie:")
+  ) {
+
     const movieId =
-      Number(data.split(":")[1]);
+      Number(
+        data.split(":")[1]
+      );
 
     const movie =
-      await getMovie(env, movieId);
+      await getMovie(
+        env,
+        movieId
+      );
 
     if (!movie) {
+
       await sendMessage(
         env,
         chatId,
@@ -745,14 +975,20 @@ async function handleCallback(env, callback) {
     }
 
     const joined =
-      await checkMembership(env, userId);
+      await checkMembership(
+        env,
+        userId
+      );
 
     if (!joined) {
+
       await sendMessage(
         env,
         chatId,
+
         `🔒 <b>JOIN REQUIRED</b>\n\n` +
         `Please join our channel before accessing this movie.`,
+
         {
           reply_markup:
             joinKeyboard(env)
@@ -770,27 +1006,34 @@ async function handleCallback(env, callback) {
   }
 }
 
-/* -----------------------------
-   COMMANDS
------------------------------ */
+/* =========================
+   PRIVATE CHAT
+========================= */
 
 async function handlePrivateMessage(
   env,
   message
 ) {
+
   const text =
-    message.text?.trim() || "";
+    message.text?.trim() ||
+    "";
 
   const chatId =
     message.chat.id;
 
-  if (text.startsWith("/start")) {
+  if (
+    text.startsWith("/start")
+  ) {
+
     await sendMessage(
       env,
       chatId,
+
       `<b>🎬 Welcome to MovieDeta Bot!</b>\n\n` +
       `Search movies quickly and easily.\n\n` +
       `Use this bot for free.`,
+
       {
         reply_markup:
           mainKeyboard(env)
@@ -800,22 +1043,30 @@ async function handlePrivateMessage(
     return;
   }
 
-  if (text === "/help") {
+  if (
+    text === "/help"
+  ) {
+
     await sendMessage(
       env,
       chatId,
+
       `<b>🆘 HELP</b>\n\n` +
       `Search for a movie from the group.\n` +
       `Select the movie result.\n` +
       `Join the required channel.\n` +
       `Then access the available content.`,
+
       {
         reply_markup: {
           inline_keyboard: [
             [
               {
-                text: "🆘 CONTACT SUPPORT",
-                url: env.HELP_URL
+                text:
+                  "🆘 CONTACT SUPPORT",
+
+                url:
+                  env.HELP_URL
               }
             ]
           ]
@@ -827,24 +1078,40 @@ async function handlePrivateMessage(
   }
 }
 
-/* -----------------------------
-   UPDATE HANDLER
------------------------------ */
+/* =========================
+   UPDATE PROCESSOR
+========================= */
 
-async function processUpdate(env, update) {
-  if (update.callback_query) {
+async function processUpdate(
+  env,
+  update
+) {
+
+  /* Button */
+
+  if (
+    update.callback_query
+  ) {
+
     return handleCallback(
       env,
       update.callback_query
     );
   }
 
-  if (update.channel_post) {
+  /* Channel */
+
+  if (
+    update.channel_post
+  ) {
+
     return indexChannelPost(
       env,
       update.channel_post
     );
   }
+
+  /* Message */
 
   if (!update.message) {
     return;
@@ -854,6 +1121,7 @@ async function processUpdate(env, update) {
     update.message;
 
   if (message.from) {
+
     await saveUser(
       env,
       message.from
@@ -863,14 +1131,18 @@ async function processUpdate(env, update) {
   const chatType =
     message.chat?.type;
 
+  /* Group */
+
   if (
     chatType === "group" ||
     chatType === "supergroup"
   ) {
+
     if (
       message.text &&
       !message.text.startsWith("/")
     ) {
+
       return searchFromGroup(
         env,
         message
@@ -880,7 +1152,12 @@ async function processUpdate(env, update) {
     return;
   }
 
-  if (chatType === "private") {
+  /* Private */
+
+  if (
+    chatType === "private"
+  ) {
+
     return handlePrivateMessage(
       env,
       message
@@ -888,19 +1165,32 @@ async function processUpdate(env, update) {
   }
 }
 
-/* -----------------------------
-   WORKER
------------------------------ */
+/* =========================
+   CLOUDFLARE WORKER
+========================= */
 
 export default {
-  async fetch(request, env) {
-    if (request.method === "GET") {
+
+  async fetch(
+    request,
+    env
+  ) {
+
+    /* Browser test */
+
+    if (
+      request.method === "GET"
+    ) {
+
       return new Response(
         "MovieDeta Bot is running!"
       );
     }
 
-    if (request.method !== "POST") {
+    if (
+      request.method !== "POST"
+    ) {
+
       return new Response(
         "Method Not Allowed",
         {
@@ -910,6 +1200,7 @@ export default {
     }
 
     try {
+
       const update =
         await request.json();
 
@@ -921,7 +1212,9 @@ export default {
       return Response.json({
         ok: true
       });
+
     } catch (error) {
+
       console.error(error);
 
       return Response.json(
@@ -936,7 +1229,15 @@ export default {
     }
   },
 
-  async scheduled(event, env) {
-    await cleanupMessages(env);
+  /* Runs every minute */
+
+  async scheduled(
+    event,
+    env
+  ) {
+
+    await cleanupMessages(
+      env
+    );
   }
 };
